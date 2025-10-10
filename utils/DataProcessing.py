@@ -3,6 +3,9 @@ from nltk import pos_tag , word_tokenize
 import re
 from nltk.corpus import stopwords
 
+nltk.download("punkt", quiet=True) # tokenizer
+nltk.download("averaged_perceptron_tagger", quiet=True) # for POS
+
 def CleanText(text):
     text = re.sub(r"[^a-zA-Z\s]", "", text)
     return " ".join([word.lower() for word in text.split() if word.lower() not in stopwords])
