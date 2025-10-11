@@ -3,8 +3,8 @@ from nltk import pos_tag , word_tokenize
 import re
 from nltk.corpus import stopwords
 
-nltk.download("punkt", quiet=True) # tokenizer
-nltk.download("averaged_perceptron_tagger", quiet=True) # for POS
+# nltk.download("punkt", quiet=True) # tokenizer
+# nltk.download("averaged_perceptron_tagger_eng", quiet=True) # for POS
 
 def CleanText(text):
     text = re.sub(r"[^a-zA-Z\s]", "", text)
