@@ -1,21 +1,9 @@
 from transformers import pipeline
-from utils.DataProcessing import AspectExtraction,CleanText
+from utils.DataProcessing import AspectExtraction
 from nltk import pos_tag
 
 
-def classify_sentiment(texts, model_name="nlptown/bert-base-multilingual-uncased-sentiment"):
-    pipe = pipeline("sentiment-analysis", model=model_name)
-    results = pipe(texts)
-    mapped = []
-    for r in results:
-        l = r["label"].lower()
-        if "1" in l or "2" in l or "neg" in l:
-            mapped.append("negative")
-        elif "3" in l or "neutral" in l:
-            mapped.append("neutral")
-        else:
-            mapped.append("positive")
-    return mapped
+
 
 def map_stars_to_sentiment(label:str):
     label = label.lower()
@@ -25,45 +13,52 @@ def map_stars_to_sentiment(label:str):
         return "neutral"
     return "positive"
 
-def aspect_sentiment_analysis(df, text_col="Summary"):
-    pipe = pipeline("sentiment-analysis", model="nlptown/bert-base-multilingual-uncased-sentiment")
 
+
+
+def generate_AspectOpinionPairs(pairs,text):
+    
+    NEGATIONS = {"no", "not", "never", "none", "hardly", "barely", "don’t", "doesn’t", "didn’t", "can’t", "cannot"}
+    normalized_pairs = [] # tuple (aspect,opinion,negation)
+    contextual_inputs = [] # contextual opinions of aspects
+    if pairs:
+
+        for w1, w2 in pairs:
+            opinion,aspect = w1, w2
+            # build contextual input for model 
+            contextual_text = (
+                f"Aspect: {aspect}\nOpinion: {opinion}"
+            )
+
+            normalized_pairs.append((aspect, opinion))
+            contextual_inputs.append(contextual_text)
+    
+    return normalized_pairs,  contextual_inputs
+
+
+
+def aspect_sentiment_analysis(df, text_col="Summary"):
+    
+    pipe = pipeline("sentiment-analysis", model="nlptown/bert-base-multilingual-uncased-sentiment")
     all_aspect_data = []
 
     for text in df[text_col]:
         pairs = AspectExtraction(text)
         aspects = []
+        normalized_pairs,contextual_inputs = generate_AspectOpinionPairs(pairs,text)
 
-        if pairs:
-            phrases = []
-            normalized_pairs = []
+        # run transformer model on full contextual inputs
+        results = pipe(contextual_inputs)
 
-            for w1, w2 in pairs:
-                # Use POS tagging to detect which is noun/adjective
-                tags = pos_tag([w1, w2])
-                if tags[0][1].startswith("JJ") and tags[1][1].startswith("NN"):
-                    # adjective → noun
-                    adj, noun = w1, w2
-                elif tags[0][1].startswith("NN") and tags[1][1].startswith("JJ"):
-                    # noun → adjective
-                    noun, adj = w1, w2
-                else:
-                    # fallback — assume noun-adjective order
-                    noun, adj = w1, w2
+        # postprocess model output
+        for (aspect, opinion), res in zip(normalized_pairs, results):
+            sentiment = map_stars_to_sentiment(res["label"])
 
-                normalized_pairs.append((noun, adj))
-                phrases.append(f"{adj} {noun}")  # Adjective before noun sounds more natural for sentiment
-
-            # Run transformer on all phrases at once
-            results = pipe(phrases)
-
-            for (noun, adj), res in zip(normalized_pairs, results):
-                sentiment = map_stars_to_sentiment(res["label"])
-                aspects.append({
-                    "aspect": noun,
-                    "opinion": adj,
-                    "sentiment": sentiment
-                })
+            aspects.append({
+                "aspect": aspect,
+                "opinion": opinion,
+                "sentiment": sentiment
+            })
 
         all_aspect_data.append(aspects)
 
