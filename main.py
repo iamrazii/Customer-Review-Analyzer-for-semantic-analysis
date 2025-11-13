@@ -77,7 +77,7 @@ def run_model_3_dl_intent(df):
         return
 
     try:
-        # Get a sample of 5 non-empty summaries
+        # Get a sample of 50 non-empty summaries
         summary_sample = df[df['Summary'].str.len() > 10].sample(50)['Summary'].tolist()
         
         if summary_sample:
