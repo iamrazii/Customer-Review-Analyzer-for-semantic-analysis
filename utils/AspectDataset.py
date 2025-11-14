@@ -5,6 +5,7 @@ import pandas as pd
 def generate_aspect_dataset(df: pd.DataFrame):
     data = []
     for _, row in df.iterrows():
+        review_id = row["index"]
         product_id = row["product_id"]
         entries = row["aspect_sentiments"]  # list of dicts
 
@@ -18,6 +19,7 @@ def generate_aspect_dataset(df: pd.DataFrame):
             phrase = f"{opinion} {aspect}"
 
             data.append({
+                "review_id":review_id,
                 "product_id":product_id,
                 "aspect": aspect,
                 "opinion": opinion,
