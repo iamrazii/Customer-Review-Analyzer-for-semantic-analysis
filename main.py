@@ -107,10 +107,8 @@ if __name__ == "__main__":
 
 
         # --- Model 2: ML Sentiment Training ---
-
-        # This model TRAINS a Logistic Regression model on 'aspect_data.csv'.
         
-        # run_model_2_ml_training(aspect_df)
+        run_model_2_ml_training(aspect_df)
         
 
 
