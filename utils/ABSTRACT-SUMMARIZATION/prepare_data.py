@@ -1,115 +1,202 @@
 import pandas as pd
 from sklearn.model_selection import train_test_split
 import os
+import re
+import ftfy
+import unicodedata
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.normpath(os.path.join(BASE_DIR, "../../data"))
+SPLIT_DIR = os.path.join(DATA_DIR, "split-data")
+MODELS_DIR = os.path.join(BASE_DIR, "models")
+RESULTS_DIR = os.path.join(BASE_DIR, "results")
+
+ENCODINGS = ("utf-8", "latin1", "cp1252", "iso-8859-1")
+
+# FIX: Swapped these since your CSV has them backwards
+REVIEW_COL = "Summary"  # This column has the actual review text
+SUMMARY_COL = "Review"  # This column has short sentiment labels
+SENTIMENT_COL = "Sentiment"
+PRODUCT_COL = "product_name"
+
+REQUIRED_COLUMNS = (
+    REVIEW_COL, SUMMARY_COL, SENTIMENT_COL, PRODUCT_COL
+)
+
+REQUIRED_DIRS = (MODELS_DIR, RESULTS_DIR, SPLIT_DIR)
+
+def clean_text(text):
+    if pd.notna(text): 
+        text = str(text)
+        text = unicodedata.normalize("NFKC", text)
+        text = ftfy.fix_text(text)
+        text = re.sub(r"\?{2,}", " ", text)
+        text = text.replace("\n", " ")
+        text = re.sub(r"\s+", " ", text)
+        text = text.encode("ascii", "ignore").decode("ascii", "ignore")
+        return text.strip()
+    return ""
 
 
-def create_summary_data(df, min_reviews=3, max_reviews=10):
-    """
-    Create training examples: group reviews by product + sentiment
-    Limit input reviews to avoid exceeding token limits
-    """
-    print("\nCreating training examples...")
-    
-    # Create product_id from product_name
-    df['product_id'] = df['product_name'].astype('category').cat.codes
-    
-    training_data = []
-    
-    for prod_id in df['product_id'].unique():
-        product_df = df[df['product_id'] == prod_id]
+def resolve_data_path():
+    candidates = (
+        os.path.join(DATA_DIR, "data.csv"),
+        os.path.join(BASE_DIR, "data", "data.csv"),
+    )
+    return next((p for p in candidates if os.path.exists(p)), None)
+
+
+def read_dataset():
+    data_path = resolve_data_path()
+    if not data_path:
+        print("❌ data.csv not found.")
+        return None
+
+    df = None
+
+    for coding in ENCODINGS:
+        try:
+            df = pd.read_csv(data_path, encoding=coding)
+            break
+        except Exception:
+            continue
+
+    if df is None:
+        print("❌ Could not read CSV with any encoding")
+        return None
+
+    # Clean ALL text columns
+    for col in df.columns:
+        if df[col].dtype == "object":
+            df[col] = df[col].map(clean_text)
+
+    missing = [c for c in REQUIRED_COLUMNS if c not in df.columns]
+    if missing:
+        print(f"❌ Missing required columns: {missing}")
+        return None
+
+    # Remove duplicate input/summary pairs
+    df.drop_duplicates(subset=[REVIEW_COL, SUMMARY_COL], inplace=True)
+
+    return df
+
+def create_aspect_summary_data(df):
+    df[SENTIMENT_COL] = df[SENTIMENT_COL].str.lower()
+    df = df[df[SENTIMENT_COL].isin(["positive", "negative"])]
+
+    prompts = {
+        "positive": "summarize what people like about",
+        "negative": "summarize what people dislike about",
+    }
+
+    # Expanded list of generic, useless summaries/labels to filter out
+    GENERIC_BAD = [
+        "very good product", "very bad product",
+        "i am very happy", "i am not happy",
+        "good product", "bad product",
+        "super", "awesome", "fair", "delightful", "wonderful",
+        "terrible", "horrible", "useless", "worthless",
+        "good", "bad", "ok", "nice", "poor",
+        "best", "worst", "amazing", "fabulous"
+    ]
+
+    MAX_REV = 1800
+    MAX_SUM = 280
+
+    grouped = df.groupby([PRODUCT_COL, SENTIMENT_COL])
+    output = []
+
+    for (product, sentiment), group in grouped:
+
+        if len(group) < 2:
+            continue
+
+        # Collect reviews (now from Summary column which has actual text)
+        reviews_list = group[REVIEW_COL].dropna().tolist()
         
-        # POSITIVE reviews (PROS)
-        pos_reviews = product_df[product_df['Sentiment'] == 'positive']['Summary'].dropna().astype(str).tolist()
-        if len(pos_reviews) >= min_reviews:
-            # Limit to max_reviews to avoid token limit issues
-            selected_reviews = pos_reviews[:max_reviews]
-            combined_text = " ".join(selected_reviews)
-            # Use first review as target (simpler summary)
-            summary = pos_reviews[0]
-            
-            training_data.append({
-                'product_id': prod_id,
-                'type': 'pros',
-                'input_text': f"summarize pros: {combined_text}",
-                'target_summary': summary
-            })
+        # Filter out short sentiment labels that got mixed in
+        reviews_list = [r for r in reviews_list if len(r) > 20]
+        reviews_list = list(dict.fromkeys(reviews_list))  # dedupe
+        reviews_list = reviews_list[:5]  # limit
+
+        if len(reviews_list) < 2:
+            continue
+
+        reviews_joined = " [SEP] ".join(reviews_list)[:MAX_REV]
+
+        sorted_reviews = sorted(reviews_list, key=len, reverse=True)
         
-        # NEGATIVE reviews (CONS)
-        neg_reviews = product_df[product_df['Sentiment'] == 'negative']['Summary'].dropna().astype(str).tolist()
-        if len(neg_reviews) >= min_reviews:
-            selected_reviews = neg_reviews[:max_reviews]
-            combined_text = " ".join(selected_reviews)
-            summary = neg_reviews[0]
-            
-            training_data.append({
-                'product_id': prod_id,
-                'type': 'cons',
-                'input_text': f"summarize cons: {combined_text}",
-                'target_summary': summary
-            })
-    
-    return pd.DataFrame(training_data)
+        # Take the longest review as the target summary (it has most detail)
+        target = sorted_reviews[0][:MAX_SUM]
+
+        target = target.strip()
+
+        if len(target) < 20 or len(reviews_joined) < 30:
+            continue
+
+        prefix = prompts[sentiment]
+
+        output.append({
+            "product_name": product,
+            "sentiment": sentiment,
+            "input_text": f"{prefix} {product}: {reviews_joined}",
+            "target_summary": target,
+        })
+
+    return pd.DataFrame(output)
+
+
+def split_dataset(df):
+    enough = len(df) >= 12
+
+    try:
+        if "sentiment" in df.columns and enough:
+            train, temp = train_test_split(
+                df, test_size=0.2, random_state=42,
+                stratify=df["sentiment"]
+            )
+            val, test = train_test_split(
+                temp, test_size=0.5, random_state=42,
+                stratify=temp["sentiment"]
+            )
+        else:
+            train, temp = train_test_split(df, test_size=0.2, random_state=42)
+            val, test = train_test_split(temp, test_size=0.5, random_state=42)
+    except Exception:
+        train, temp = train_test_split(df, test_size=0.2, random_state=42)
+        val, test = train_test_split(temp, test_size=0.5, random_state=42)
+
+    return train, val, test
+
+def save_splits(train, val, test):
+    for name, data in zip(["train", "val", "test"], [train, val, test]):
+        data.to_csv(os.path.join(SPLIT_DIR, f"{name}.csv"),
+                    index=False, encoding="utf-8")
+
+    print(f"\n✓ Saved {len(train)} train, {len(val)} val, {len(test)} test examples\n")
+
 
 
 def main():
-    print("="*60)
-    print("DATA PREPARATION FOR SUMMARIZATION")
-    print("="*60)
-    
-    # Load data
-    print("\n[STEP 1/3] Loading data...")
-    data_path = "../../data/data.csv"
-    
-    if not os.path.exists(data_path):
-        data_path = "data/data.csv"
-    
-    df = pd.read_csv(data_path)
-    print(f"✓ Loaded {len(df)} reviews")
-    
-    # Create training examples
-    print("\n[STEP 2/3] Creating training examples...")
-    summary_df = create_summary_data(df, min_reviews=3, max_reviews=10)
-    print(f"✓ Created {len(summary_df)} examples")
-    print(f"  - Pros: {len(summary_df[summary_df['type']=='pros'])}")
-    print(f"  - Cons: {len(summary_df[summary_df['type']=='cons'])}")
-    
-    # Check if we have data
-    if len(summary_df) == 0:
-        print("❌ Error: No training examples created!")
+
+    for folder in REQUIRED_DIRS:
+        os.makedirs(folder, exist_ok=True)
+
+    df = read_dataset()
+    if df is None:
         return
-    
-    # Split: 80% train, 10% val, 10% test
-    print("\n[STEP 3/3] Splitting data (80/10/10)...")
-    train_df, temp_df = train_test_split(summary_df, test_size=0.2, random_state=42, stratify=summary_df['type'])
-    val_df, test_df = train_test_split(temp_df, test_size=0.5, random_state=42, stratify=temp_df['type'])
-    
-    print(f"✓ Train: {len(train_df)} ({len(train_df)/len(summary_df)*100:.0f}%)")
-    print(f"✓ Val:   {len(val_df)} ({len(val_df)/len(summary_df)*100:.0f}%)")
-    print(f"✓ Test:  {len(test_df)} ({len(test_df)/len(summary_df)*100:.0f}%)")
-    
-    # Save files
-    output_dir = "../../data/split-data"
-    os.makedirs(output_dir, exist_ok=True)
-    
-    train_df.to_csv(f"{output_dir}/train.csv", index=False)
-    val_df.to_csv(f"{output_dir}/val.csv", index=False)
-    test_df.to_csv(f"{output_dir}/test.csv", index=False)
-    
-    print(f"\n✓ Saved to {output_dir}/")
-    
-    # Show sample
-    print("\n" + "="*60)
-    print("SAMPLE TRAINING EXAMPLE:")
+
+   
+
+    summary_df = create_aspect_summary_data(df)
+    if summary_df.empty:
+        print("❌ No training examples generated.")
+        return
+
+    train, val, test = split_dataset(summary_df)
+    save_splits(train, val, test)
+
+    print("\n✓ DATA PREPARATION COMPLETE!")
     print("="*60)
-    sample = train_df.iloc[0]
-    print(f"\nType: {sample['type']}")
-    print(f"Input: {sample['input_text'][:200]}...")
-    print(f"Target: {sample['target_summary']}")
-    
-    print("\n" + "="*60)
-    print("✓ DATA PREPARATION COMPLETE!")
-    print("="*60)
-    print("\n➡️  Next: Run train_and_eval.py")
 
 
 if __name__ == "__main__":
