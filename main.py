@@ -2,19 +2,26 @@ import pandas as pd
 import sys
 import warnings
 import os
+
 from utils.LoadData import loadfile
 from utils.AspectDataset import generate_aspect_dataset
+
 from modules.ABSA import aspect_sentiment_analysis
 from modules.ML_Sentiment import train_ml_model
 from modules.DL_Intent import evaluate_intent_model, refresh_predictions
+
+try:
+    from modules.ABSAMLPrediction import train_pipeline, predict_sentiment
+    from modules.ABSATransformer import train_simple_absa, predict_sentiment as transformer_predict_sentiment
+except ImportError as e:
+    print(f"Warning: Could not import external modules ({e}). Skipping those steps.")
+
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
-
 def load_and_prepare_data():
-    """
-    Handles loading the main data.csv file and performing initial prep.
-    """
-    print("\n--- Step 1: Loading and Preparing Data ---")
+    print("\n" + "="*50)
+    print("--- STEP 1: Loading Dataset ---")
+    print("="*50)
     try:
         df = loadfile("data/data.csv")
     except FileNotFoundError:
@@ -27,90 +34,104 @@ def load_and_prepare_data():
         print("Error: 'Summary' column not found in data.csv.")
         return None
         
-  
     df.dropna(subset=["Summary"], inplace=True)
     df["Summary"] = df["Summary"].astype(str)
     return df
 
-
-def run_model_1_absa(df):
-    print("\n--- Step 2: Running Transformer ABSA (Model 1) ---")
+def generate_absa_data(df):
+    print("\n" + "="*50)
+    print("--- STEP 2: Transformer ABSA (Data Generation) ---")
+    print("="*50)
+    
     if df is None:
-        print("Cannot run Model 1: Data frame is empty.")
-        return None, None
-        
+        print("Data is empty. Skipping.")
+        return None
+
     df = aspect_sentiment_analysis(df)
     
-    print("Generating aspect dataset from Model 1 results...")
+    print("Generating aspect dataset (aspect_data.csv)...")
     aspect_df = generate_aspect_dataset(df)
     print(f"Generated {len(aspect_df)} aspect-sentiment entries.")
     
-    return df, aspect_df
+    return aspect_df
 
-    # creating aspect dataset 
-    # aspect_df = generate_aspect_dataset(aspect_df)
-
-    aspect_df = pd.read_csv("data/aspect_data.csv")
+def run_gradient_boosting_training(aspect_df):
+    print("\n" + "="*50)
+    print("--- STEP 3: Gradient Boosting Sentiment Training ---")
+    print("="*50)
     
-    print("-----------------ABSA Machine Learning--------------------")
-    model,vectorizer = train_pipeline(aspect_df) # ABSA ML MODEL 
-    
-    test_sentence  = "Although processing speed is good, battery is bad."
-    print(f"Showcasing example of ABSA ML on {test_sentence}")
-    preds = predict_sentiment(model, vectorizer, test_sentence)
-
-    print("Predictions:")
-    print(preds)
-    print("\n\n-----------------ABSA TRANSFORMER--------------------")
-    train_simple_absa(aspect_df, model_name="distilbert-base-uncased", output_dir="models/absa_pytorch")  # ABSA TRANFORMER
-
-    transres= transformer_predict_sentiment(test_sentence)
-    print(transres)
-    
-
-def run_model_2_ml_training(aspect_df):
-    print("\n--- Step 3: Training ML Sentiment Model (Model 2) ---")
     if aspect_df is None or aspect_df.empty:
-        print("Skipping ML Model training: No aspect data was provided (run Model 1 first).")
+        print("Skipping: No aspect data provided.")
         return
-        
+
     train_ml_model()
 
+def run_absa_ml_prediction(aspect_df):
+    print("\n" + "="*50)
+    print("--- STEP 4: ABSA ML Pipeline Prediction ---")
+    print("="*50)
 
-def run_model_3_dl_intent(df):
-    """
-    Runs the Deep Learning Intent evaluation (Model 3).
-    """
-    print("\n--- Step 4: DL Intent Checker (Model 3) ---")
+    if aspect_df is None or aspect_df.empty:
+        try:
+            aspect_df = pd.read_csv("data/aspect_data.csv")
+        except:
+            print("Skipping: No aspect data found.")
+            return
+
+    model, vectorizer = train_pipeline(aspect_df)
     
+    test_sentence = "Although processing speed is good, battery is bad."
+    print(f"\n[Demo] Testing on: '{test_sentence}'")
+    preds = predict_sentiment(model, vectorizer, test_sentence)
+    print(f"Prediction: {preds}")
+
+def run_absa_transformer_training(aspect_df):
+    print("\n" + "="*50)
+    print("--- STEP 5: ABSA Transformer Fine-Tuning ---")
+    print("="*50)
+
+    if aspect_df is None or aspect_df.empty:
+        try:
+            aspect_df = pd.read_csv("data/aspect_data.csv")
+        except:
+            print("Skipping: No aspect data found.")
+            return
+
+    train_simple_absa(aspect_df, model_name="distilbert-base-uncased", output_dir="models/absa_pytorch")
+    
+    test_sentence = "Although processing speed is good, battery is bad."
+    print(f"\n[Demo] Testing on: '{test_sentence}'")
+    transres = transformer_predict_sentiment(test_sentence)
+    print(f"Prediction: {transres}")
+
+def run_dl_intent_analysis(df):
+    print("\n" + "="*50)
+    print("--- STEP 6: DL Intent Analysis ---")
+    print("="*50)
+
     label_file = "data/intent_labeling_task.csv"
 
     if not os.path.exists(label_file):
         print(f"Error: {label_file} not found.")
         print("Please ensure you have generated and labeled the intent data file.")
     else:
-       
         refresh_predictions()
         evaluate_intent_model()
 
-
-if __name__ == "__main__":
-    print("--- NLP Project Start ---")
+def main():
+    print("--- COMBINED NLP PROJECT RUNNER ---")
     
     main_df = load_and_prepare_data()
     
     if main_df is not None:
-        
-        # --- Model 1: Transformer ABSA ---
-        main_df, aspect_df = run_model_1_absa(main_df)
-        
-        # --- Model 2: ML Sentiment Training ---
-        run_model_2_ml_training(aspect_df)
-        
-        # --- Model 3: DL Intent Checker ---
-        #run_model_3_dl_intent(main_df)
-        
+        aspect_df = generate_absa_data(main_df)
+        run_gradient_boosting_training(aspect_df)
+        run_absa_ml_prediction(aspect_df)
+        run_absa_transformer_training(aspect_df)
+        run_dl_intent_analysis(main_df)
     else:
-        print("Failed to load data. Exiting.")
+        print("Critical Error: Failed to load data. Exiting.")
 
-    print("\n--- Project End ---")
+
+if __name__ == "__main__":
+    main()
