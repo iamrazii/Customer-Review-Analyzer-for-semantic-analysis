@@ -29,15 +29,14 @@ GEN_BEAMS = 2
 def load_test_data():
     """Load test dataset"""
     print("\n[STEP 1/3] Loading test data...")
-    test_df = pd.read_csv(f"{SPLIT_DIR}/test.csv")
+    test_df = pd.read_csv(f"{SPLIT_DIR}/test.csv")  # reuse pre-split CSV from prepare_data
     print(f"✓ Test examples: {len(test_df)}")
     return test_df
 
 
 def prepare_test_dataset(test_df, tokenizer):
-    """Tokenize test dataset"""
     print("\n[STEP 2/3] Tokenizing test data...")
-    
+    # map raw text columns into token IDs + labels so evaluation mirrors training format
     def tokenize_function(batch):
         inputs = tokenizer(
             batch["input_text"],
@@ -61,7 +60,7 @@ def prepare_test_dataset(test_df, tokenizer):
     test_dataset = test_dataset.map(
         tokenize_function,
         batched=True,
-        num_proc=2,
+        num_proc=2,            # modest parallelism keeps CPU usage manageable
         remove_columns=test_dataset.column_names,
         desc="Tokenizing test set"
     )

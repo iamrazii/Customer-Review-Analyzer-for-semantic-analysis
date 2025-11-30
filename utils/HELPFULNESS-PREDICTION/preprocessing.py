@@ -4,7 +4,7 @@ import re
 
 def clean_text(text):
     text = str(text)
-    cleaned = re.sub(r"[^a-zA-Z0-9\s.,!?]", " ", text)
+    cleaned = re.sub(r"[^a-zA-Z0-9\s.,!?]", " ", text)  # Keep alphanumerics/punctuation
     return re.sub(r"\s+", " ", cleaned).strip()
 
 
@@ -13,6 +13,7 @@ def map_sentiment_to_numeric(sentiment):
         str(sentiment).lower(), 0.5
     )
 
+# Count syllables in a word
 def count_syllables(word):
     word = word.lower()
     vowels = "aeiouy"
@@ -30,6 +31,7 @@ def count_syllables(word):
     return max(1, count)
 
 
+# Calculate Flesch Reading Ease score
 def calculate_readability(text, words):
     if len(words) < 3:
         return 50.0
@@ -44,12 +46,13 @@ def calculate_readability(text, words):
     )
     return max(0, min(100, score))
 
-
+#constants with some jargon
 PRODUCT_TERMS = [
     "battery", "screen", "camera", "processor", "memory", "price",
     "quality", "performance", "design", "durability", "sound",
     "display", "storage", "speed", "charging"
 ]
+
 
 TECH_TERMS = [
     "mah", "ghz", "gb", "ram", "rom", "megapixel", "mp", "inch",
@@ -95,8 +98,9 @@ def extract_enhanced_features(text, sentiment, rating):
     text_lower = text.lower()
     words = text.split()
 
-    nums = len(re.findall(r"\b\d+\b", text))
+    nums = len(re.findall(r"\b\d+\b", text))  # Numeric mentions
 
+    # Build feature dictionary
     features = {
         "review_length": len(words),
         "char_count": len(text),
@@ -108,7 +112,7 @@ def extract_enhanced_features(text, sentiment, rating):
         "readability_score": calculate_readability(text, words),
         "specificity_score": nums * 5 + sum(f in text_lower for f in PRODUCT_TERMS) * 3,
         "tech_term_count": sum(t in text_lower for t in TECH_TERMS),
-        "time_reference_count": sum(t in text_lower for t in TIME_TERMS),
+        "time_reference_count": sum(t in text_lower for t in TIME_TERMS), # time refs
         "question_count": text.count("?"),
         "exclamation_count": text.count("!"),
         "caps_ratio": sum(c.isupper() for c in text) / len(text) if len(text) else 0,
@@ -119,19 +123,16 @@ def extract_enhanced_features(text, sentiment, rating):
         "has_cons": int(any(w in text_lower for w in CONS)),
         "has_comparison": int(any(c in text_lower for c in COMPARISONS)),
         "has_personal_experience": int(any(e in text_lower for e in EXPERIENCE)),
-        
-        # NEW FEATURE: Count of warning signals
         "warning_signal_count": sum(w in text_lower for w in WARNING_TERMS),
         
-        "info_density": (nums + sum(f in text_lower for f in PRODUCT_TERMS))
-        / len(words)
+        "info_density": (nums + sum(f in text_lower for f in PRODUCT_TERMS)) 
+        / len(words) 
         if words
         else 0,
     }
 
     return features
 
-# FIXED: Restored missing function definition line
 def extract_enhanced_features_from_dataframe(df):
     print("Extracting features from reviews...")
     features = [extract_enhanced_features(r.Summary, r.Sentiment, r.Rate) for r in df.itertuples()]
@@ -144,7 +145,7 @@ def calculate_helpfulness(text):
     words = text.split()
     wc = len(words)
 
-    score = 0
+    score = 0  # Composite heuristic score
 
     # 1. Length (max 25)
     score += [5, 10, 15, 20, 25][
@@ -179,7 +180,7 @@ def calculate_helpfulness(text):
 
     return float(min(score, 100))
 
-
+# Define feature order for consistent extraction
 FEATURE_ORDER = [
     "review_length", "char_count", "num_count", "avg_word_len",
     "sentence_count", "sentiment", "rating", "readability_score",
@@ -194,8 +195,7 @@ FEATURE_ORDER = [
 def prepare_features_for_prediction(text, sentiment, rating, tfidf, scaler):
     clean = clean_text(text)
 
-    # numeric features
-    num_dict = extract_enhanced_features(clean, sentiment, rating)
+    num_dict = extract_enhanced_features(clean, sentiment, rating)  # Deterministic order
     num_arr = np.array([[num_dict[f] for f in FEATURE_ORDER]], dtype=np.float64)
 
     # text features
@@ -203,6 +203,6 @@ def prepare_features_for_prediction(text, sentiment, rating, tfidf, scaler):
 
     X = np.hstack([num_arr, tfidf_arr])
     num_feat_count = len(FEATURE_ORDER)
-    X[:, :num_feat_count] = scaler.transform(X[:, :num_feat_count])
+    X[:, :num_feat_count] = scaler.transform(X[:, :num_feat_count])  # Scale numeric slice
 
     return X

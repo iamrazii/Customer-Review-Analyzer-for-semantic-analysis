@@ -12,7 +12,6 @@ RESULTS_DIR = os.path.join(BASE_DIR, "results")
 
 ENCODINGS = ("utf-8", "latin1", "cp1252", "iso-8859-1")
 
-# FIX: Swapped these since your CSV has them backwards
 REVIEW_COL = "Summary"  # This column has the actual review text
 SUMMARY_COL = "Review"  # This column has short sentiment labels
 SENTIMENT_COL = "Sentiment"
@@ -25,14 +24,15 @@ REQUIRED_COLUMNS = (
 REQUIRED_DIRS = (MODELS_DIR, RESULTS_DIR, SPLIT_DIR)
 
 def clean_text(text):
+    # Normalize and clean text
     if pd.notna(text): 
         text = str(text)
-        text = unicodedata.normalize("NFKC", text)
-        text = ftfy.fix_text(text)
-        text = re.sub(r"\?{2,}", " ", text)
+        text = unicodedata.normalize("NFKC", text)         # normalize unicode width
+        text = ftfy.fix_text(text)                        # fix mojibake
+        text = re.sub(r"\?{2,}", " ", text)               # collapse ??? artifacts
         text = text.replace("\n", " ")
-        text = re.sub(r"\s+", " ", text)
-        text = text.encode("ascii", "ignore").decode("ascii", "ignore")
+        text = re.sub(r"\s+", " ", text)                  # squeeze whitespace
+        text = text.encode("ascii", "ignore").decode("ascii", "ignore")  # strip non-ascii noise
         return text.strip()
     return ""
 
@@ -67,7 +67,7 @@ def read_dataset():
     # Clean ALL text columns
     for col in df.columns:
         if df[col].dtype == "object":
-            df[col] = df[col].map(clean_text)
+            df[col] = df[col].map(clean_text)  # normalize all text columns early
 
     missing = [c for c in REQUIRED_COLUMNS if c not in df.columns]
     if missing:
@@ -76,7 +76,6 @@ def read_dataset():
 
     # Remove duplicate input/summary pairs
     df.drop_duplicates(subset=[REVIEW_COL, SUMMARY_COL], inplace=True)
-
     return df
 
 def create_aspect_summary_data(df):
@@ -106,9 +105,8 @@ def create_aspect_summary_data(df):
     output = []
 
     for (product, sentiment), group in grouped:
-
         if len(group) < 2:
-            continue
+            continue  # need multiple reviews per sentiment bucket
 
         # Collect reviews (now from Summary column which has actual text)
         reviews_list = group[REVIEW_COL].dropna().tolist()
@@ -126,7 +124,7 @@ def create_aspect_summary_data(df):
         sorted_reviews = sorted(reviews_list, key=len, reverse=True)
         
         # Take the longest review as the target summary (it has most detail)
-        target = sorted_reviews[0][:MAX_SUM]
+        target = sorted_reviews[0][:MAX_SUM]  # longest review doubles as target
 
         target = target.strip()
 
@@ -152,11 +150,11 @@ def split_dataset(df):
         if "sentiment" in df.columns and enough:
             train, temp = train_test_split(
                 df, test_size=0.2, random_state=42,
-                stratify=df["sentiment"]
+                stratify=df["sentiment"]               # keep sentiment balance in train
             )
             val, test = train_test_split(
                 temp, test_size=0.5, random_state=42,
-                stratify=temp["sentiment"]
+                stratify=temp["sentiment"]             # balanced val/test if possible
             )
         else:
             train, temp = train_test_split(df, test_size=0.2, random_state=42)
@@ -171,7 +169,6 @@ def save_splits(train, val, test):
     for name, data in zip(["train", "val", "test"], [train, val, test]):
         data.to_csv(os.path.join(SPLIT_DIR, f"{name}.csv"),
                     index=False, encoding="utf-8")
-
     print(f"\n✓ Saved {len(train)} train, {len(val)} val, {len(test)} test examples\n")
 
 

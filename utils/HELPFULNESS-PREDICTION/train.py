@@ -26,15 +26,14 @@ def main():
 
     log("Loading dataset...")
     df = pd.read_csv("../../data/data.csv")[["Summary", "Sentiment", "Rate"]].dropna()
-    df["Summary"] = df["Summary"].apply(clean_text)
+    df["Summary"] = df["Summary"].apply(clean_text)  # Normalize review text
 
-    # Helpful score
     log("Generating helpfulness scores...")
-    df["helpfulness"] = df["Summary"].apply(calculate_helpfulness)
+    df["helpfulness"] = df["Summary"].apply(calculate_helpfulness)  # Heuristic label
 
     # Fix/validate Rate
     df["Rate"] = pd.to_numeric(df["Rate"], errors="coerce")
-    df = df.dropna(subset=["Rate"])
+    df = df.dropna(subset=["Rate"])  # Drop rows with invalid ratings
 
     log("Extracting numeric features...")
     X_num_df = extract_enhanced_features_from_dataframe(df)
@@ -48,7 +47,7 @@ def main():
         ngram_range=(1, 2),
         min_df=2
     )
-    X_tfidf = tfidf.fit_transform(df["Summary"]).toarray()
+    X_tfidf = tfidf.fit_transform(df["Summary"]).toarray()  # Dense text features
 
     log("Combining features...")
     X = np.hstack([X_num, X_tfidf])
@@ -87,14 +86,14 @@ def main():
         
     )
 
-    model.fit(X_train, y_train, eval_set=(X_test, y_test), plot=False)
+    model.fit(X_train, y_train, eval_set=(X_test, y_test), plot=False)  # Train + early stop
 
     log("Saving model artifacts...")
     os.makedirs("models", exist_ok=True)
 
     save_pickle(model, "models/catboost.pkl")
     save_pickle(scaler, "models/scaler.pkl")
-    save_pickle(tfidf, "models/tfidf.pkl")
+    save_pickle(tfidf, "models/tfidf.pkl")  # Persist artifacts for evaluation
 
     with open("models/model_info.txt", "w") as f:
         f.write(f"Features: {X.shape[1]}\n")

@@ -49,7 +49,7 @@ def load_data():
 
 def prepare_datasets(train_df, val_df, test_df, tokenizer):
     print("\n[STEP 2/3] Tokenizing datasets...")
-
+    # Define tokenization logic for inputs and labels
     def tokenize_function(batch):
         inputs = tokenizer(
             batch["input_text"],
@@ -68,12 +68,14 @@ def prepare_datasets(train_df, val_df, test_df, tokenizer):
         inputs["labels"] = labels["input_ids"]
         return inputs
 
+    # Convert dataframes to Hugging Face Datasets
     train_dataset = Dataset.from_pandas(train_df)
     val_dataset = Dataset.from_pandas(val_df)
-    test_dataset = Dataset.from_pandas(test_df)
+    test_dataset = Dataset.from_pandas(test_df)  # kept for future eval scripts
 
-    num_proc = 2  
+    num_proc = 2  # small worker count keeps CPU usage predictable
 
+    # Tokenize each dataset split
     def tokenize_split(ds, desc):
         return ds.map(
             tokenize_function,
@@ -105,8 +107,8 @@ def train_model(train_dataset, val_dataset, model, tokenizer):
 
     training_args = Seq2SeqTrainingArguments(
         output_dir=MODEL_RUN_DIR,
-        eval_strategy="no",
-        save_strategy="no",
+        eval_strategy="no",          
+        save_strategy="no",          
         learning_rate=1e-4,
         per_device_train_batch_size=8,
         per_device_eval_batch_size=16,
@@ -119,8 +121,8 @@ def train_model(train_dataset, val_dataset, model, tokenizer):
         dataloader_pin_memory=True,
         gradient_accumulation_steps=2,
         optim="adafactor",
-        logging_strategy="steps",  # Enable progress tracking
-        logging_steps=50,  # Update every 50 steps (minimal overhead)
+        logging_strategy="steps",   
+        logging_steps=50,
         report_to="none",
     )
 
@@ -129,10 +131,10 @@ def train_model(train_dataset, val_dataset, model, tokenizer):
         tokenizer=tokenizer,
         args=training_args,
         train_dataset=train_dataset,
-        eval_dataset=None,  # No validation dataset needed
+        eval_dataset=None,          
         data_collator=data_collator,
         compute_metrics=None,
-        callbacks=None,  # Removed early stopping since no eval
+        callbacks=None,  
     )
 
     print("Starting training...")
@@ -146,7 +148,7 @@ def train_model(train_dataset, val_dataset, model, tokenizer):
     # Save final model
     final_path = os.path.join(MODEL_RUN_DIR, "final")
     model.save_pretrained(final_path)
-    tokenizer.save_pretrained(final_path)
+    tokenizer.save_pretrained(final_path)  # required by eval-only runs
 
     print(f"\n✓ Model saved to {final_path}")
 

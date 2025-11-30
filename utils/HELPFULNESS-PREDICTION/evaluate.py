@@ -8,18 +8,17 @@ from preprocessing import prepare_features_for_prediction
 
 warnings.filterwarnings("ignore")
 
-SECTION_LINE = "=" * 60
 
 
 def print_section(title):
-    print(f"\n{SECTION_LINE}\n{title}\n{SECTION_LINE}")
+    print(f"\n{'='*10} {title} {'='*10}\n")
 
 
 def load_model():
     print_section("Loading model artifacts")
     model = pickle.load(open("models/catboost.pkl", "rb"))
     scaler = pickle.load(open("models/scaler.pkl", "rb"))
-    tfidf = pickle.load(open("models/tfidf.pkl", "rb"))
+    tfidf = pickle.load(open("models/tfidf.pkl", "rb"))  # Reuse training pipeline pieces
     print("✓ Model, scaler, and TF-IDF loaded")
     if os.path.exists("models/model_info.txt"):
         print("Model info:")
@@ -35,7 +34,7 @@ def evaluate(model, X_test, y_test):
         "MAE": mean_absolute_error(y_test, preds),
         "RMSE": np.sqrt(mean_squared_error(y_test, preds)),
         "R2": r2_score(y_test, preds)
-    }, preds
+    }, preds  # Return both metrics and raw predictions
 
 
 def display_results(results):
@@ -44,10 +43,10 @@ def display_results(results):
     print(f"RMSE: {results['RMSE']:.2f}/100")
     print(f"R²  : {results['R2']:.4f}")
     rating = (
-        "⭐⭐⭐ Excellent" if results['R2'] > 0.85 else
-        "⭐⭐ Very good" if results['R2'] > 0.75 else
-        "⭐  Good" if results['R2'] > 0.65 else
-        "⚠️  Needs work"
+        " Excellent" if results['R2'] > 0.85 else
+        " Very good" if results['R2'] > 0.75 else
+        " Good" if results['R2'] > 0.65 else
+        "Needs work"
     )
     print(f"\n{rating}")
     print(f"Typical error ≈ ±{results['MAE']:.1f} pts")
@@ -64,7 +63,7 @@ def show_samples(y_test, preds, n=10):
 
 def analyze_errors(y_test, preds):
     print_section("Error Analysis")
-    errors = np.abs(y_test - preds)
+    errors = np.abs(y_test - preds)  # Absolute deviation per sample
 
     print(f"Error < 5 pts  : {(errors < 5).mean():.1%} of predictions")
     print(f"Error > 15 pts : {(errors >= 15).mean():.1%} (Outliers)")
@@ -72,6 +71,7 @@ def analyze_errors(y_test, preds):
     worst_idx = np.argmax(errors)
     print(f"\nWorst Prediction Error: {errors[worst_idx]:.1f} pts")
     print(f"Actual: {y_test[worst_idx]:.1f} vs Pred: {preds[worst_idx]:.1f}")
+
 
 def save_results(results):
     os.makedirs("results", exist_ok=True)
@@ -107,7 +107,7 @@ def test_new_reviews(model, scaler, tfidf):
             tfidf=tfidf,
             scaler=scaler
         )
-        helpfulness = model.predict(X)[0]
+        helpfulness = model.predict(X)[0]  # Single-sample inference
         
         # Categorize helpfulness
         if helpfulness >= 75:
